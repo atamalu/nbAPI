@@ -1,0 +1,122 @@
+---
+title: "Data visualization with nbAPI"
+author: "Andrew Tamalunas"
+date: "March 23, 2019"
+output: html_document
+---
+
+Setup
+
+```{r, echo = FALSE}
+
+library(jsonlite)
+library(nbAPI)
+suppressMessages(library(dplyr))
+library(ggplot2)
+theme_set(theme_bw())
+
+```
+```{r, echo = FALSE}
+p1.theme <- theme(
+  axis.title.x = element_text(size = 15),
+  axis.title.y = element_blank(),
+  axis.text.x = element_text(size = 12),
+  axis.text.y = element_text(size = 10),
+  plot.title = element_text(hjust = 0.5, size = 18),
+  panel.grid.minor.y = element_blank(),
+  legend.title = element_text(size = 12),
+  legend.text = element_text(size = 10)
+)
+
+p2.theme <- theme(
+  axis.title.x = element_text(size = 15),
+  axis.title.y = element_blank(),
+  axis.text.x = element_text(size = 12),
+  panel.grid.minor.x = element_blank(),
+  panel.grid.major.x = element_blank(),
+  panel.grid.minor.y = element_blank(),
+  plot.title = element_text(hjust = 0.50, size = 18)
+)
+```
+
+```{r}
+### Get team shot stats for all teams
+df <- shots_stats(TeamID = 0, Type = "team")
+```
+
+Let's say that we are interested in finding the teams who shoot the most 3-pointers. Seeing the number of attempts relative to league average is more informative than the raw numbers. Subtracting the league average of a variable from the team's value for that variable gives us a reference point. So we transform the variable and make a new one for graphically labeling above and below average.
+
+```{r}
+
+### Transform columns
+df <- df %>%
+  mutate(FG3A.c = FG3A - mean(FG3A))
+
+### Add seperator variable
+df$above.below <- ifelse(df$FG3A.c >= 0, 'Above', 'Below')
+
+```
+
+We should also order the graph.
+
+```{r}
+df <- df[order(df$FG3A.c), ]
+df$TEAM_NAME <- factor(df$TEAM_NAME, levels = df$TEAM_NAME)  # keeps order in plot
+```
+
+And then make the graph
+
+```{r, fig.width = 9}
+ggplot(df, aes(x = TEAM_NAME, y = FG3A.c, label = FG3A.c)) + 
+  geom_bar(stat = 'identity', aes(fill = above.below), width=.5)  +
+  scale_fill_manual(name = "Quantity", 
+                    labels = c("Above Average", "Below Average"), 
+                    values = c("Above" = "#00ba38", "Below" = "#f8766d")) + 
+  labs(title = "Team 3-Point Attempts vs. League Average",
+       y = "Attempts") + 
+  coord_flip() +
+  p1.theme
+```
+
+The Rockets attempt more three pointers per game than any other team. Who might be skewing this number to make it so large?
+
+## The Culprit
+
+We start by using the `shots_stats` function again, but retrieving players for a single team this time
+
+```{r}
+### Get team shot stats for Rockets
+rockets.id <- df$TEAM_ID[df$TEAM_NAME == 'Houston Rockets']
+HOU.df <- shots_stats(TeamID = rockets.id, Type = "player")
+### Filter out players with very few games
+HOU.df <- HOU.df %>%
+  filter(G > 10)
+```
+
+We also want a reasonably small number of players to compare
+
+```{r}
+### Get values of top 10 players
+HOU.df <- HOU.df %>%
+  arrange(desc(FG3A))
+top10 <- head(sort(HOU.df$FG3A, decreasing=TRUE), 10)
+### Return data frame with all data
+HOU.df <- HOU.df[which(HOU.df$FG3A %in% top10), ]
+```
+
+Now we can visualize the most frequent 3-point shooters on the Rockets
+
+```{r, fig.width = 9}
+### fix player names for spacing
+HOU.df$PLAYER_NAME.g <- gsub(' ', ' \n ', HOU.df$PLAYER_NAME)
+
+ggplot(HOU.df) +
+  geom_bar(stat = 'identity', position = position_dodge(width = 0.5), 
+           aes(x = reorder(PLAYER_NAME.g, FG3A), y = FG3A)) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(title = "3-Point Attempts per Game by Rockets Players",
+         x = "Player", y = "Attempts") +
+  p2.theme
+```
+
+It won't be much of a surprise to NBA fans to see that James Harden's number of 3-point attempts is way above his teammates... and the league average. 
